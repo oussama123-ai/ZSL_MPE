@@ -1,0 +1,262 @@
+# =============================================================================
+# Zero-Shot Multimodal Pain Estimation — Default Configuration
+# =============================================================================
+
+# ── Synthetic Data Generation ─────────────────────────────────────────────────
+synthetic:
+  n_samples: 50000
+  output_dir: "data/synthetic"
+
+  # Demographic distribution (Section 3.1.2)
+  demographics:
+    age_groups: ["neonate", "child", "adult", "elderly"]
+    age_ratios: [0.25, 0.25, 0.25, 0.25]
+    ethnicity_groups: ["caucasian", "african_american", "asian", "hispanic", "other"]
+    ethnicity_ratios: [0.20, 0.20, 0.20, 0.20, 0.20]
+    sex_groups: ["female", "male"]
+    sex_ratios: [0.50, 0.50]
+
+  # Clinical context distribution
+  clinical_context:
+    settings: ["post_surgical", "procedural", "chronic", "trauma", "disease"]
+    ratios: [0.30, 0.25, 0.20, 0.15, 0.10]
+
+  # Diffusion model (Section 3.2.1)
+  diffusion:
+    model_id: "stabilityai/stable-diffusion-2-1"
+    guidance_scale: 7.5
+    num_inference_steps: 50
+    resolution: 224
+    fps: 30
+    sequence_length: 30   # frames per video
+
+  # HRV synthesis (Section 3.2.2)
+  hrv:
+    baseline_mean: 65.0
+    baseline_std: 15.0
+    alpha_min: 0.3
+    alpha_max: 0.5
+    gamma: 0.15
+    resp_freq_mean: 0.25
+    resp_freq_std: 0.05
+    noise_std: 3.0
+    duration_seconds: 120
+    sample_rate: 1000   # Hz for IBI sequences
+
+  # EDA synthesis (Section 3.2.2)
+  eda:
+    scl_base_min: 2.0
+    scl_base_max: 8.0
+    tau1: 0.75          # rise time constant (s)
+    tau2: 2.5           # recovery time constant (s)
+    noise_std: 0.02
+    sample_rate: 100    # Hz
+    lowpass_cutoff: 5.0
+
+  # Tremor synthesis (Section 3.2.2)
+  tremor:
+    center_freq: 8.0    # Hz
+    bandwidth: 3.0      # Hz
+    baseline_amplitude: 0.1
+    pain_scale: 0.05
+
+  # Inter-signal correlation (Section 3.2.2)
+  physio_correlation:
+    hrv_scr: -0.42
+    hrv_tremor: 0.31
+    scr_tremor: -0.28
+
+  # Quality assurance (Section 3.2.4)
+  quality:
+    acceptance_rate_target: 0.987
+    max_regen_attempts: 3
+    landmark_variance_threshold: 0.15
+    au_pain_mismatch_threshold: 0.30
+    optical_flow_max: 15.0
+    identity_similarity_min: 0.85
+    pain_trajectory_max_derivative: 2.0
+
+# ── Model Architecture ────────────────────────────────────────────────────────
+model:
+  # Visual encoder (Section 3.3.1)
+  visual:
+    backbone: "vit_base_patch16_224"
+    pretrained: true
+    embed_dim: 768
+    num_patches: 196
+    patch_size: 16
+    output_dim: 512
+    temporal_transformer_layers: 3
+    temporal_heads: 8
+    num_au: 6             # AU4, AU6, AU7, AU9, AU10, AU43
+
+  # Physiological encoder (Section 3.3.2)
+  physio:
+    hrv_channels: [16, 32, 64]
+    hrv_kernels: [31, 15, 7]
+    scr_channels: [16, 32, 64]
+    scr_kernels: [31, 15, 7]
+    tremor_channels: [16, 32, 64]
+    tremor_kernels: [31, 15, 7]
+    output_dim: 128       # per signal
+    dropout: 0.3
+    self_attention_heads: 4
+    fused_physio_dim: 512
+
+  # Context encoder (Section 3.3.3)
+  context:
+    age_embed_dim: 32
+    ethnicity_embed_dim: 32
+    sex_embed_dim: 16
+    clinical_input_dim: 10   # 5 settings + 5 pain types
+    clinical_embed_dim: 64
+    output_dim: 256
+
+  # Multimodal fusion transformer (Section 3.3.4)
+  fusion:
+    d_model: 512
+    n_layers: 12
+    n_heads: 8      # 512 / 8 = 64 (paper uses 12 heads with d_model=1536; scaled here)
+    d_ff: 2048
+    dropout: 0.1
+    pre_norm: true
+
+  # Regression head (Section 3.3.5)
+  regression:
+    hidden_dims: [256, 128]
+    dropout: 0.3
+    output_scale: 10.0    # pain scale 0–10
+
+  # Domain discriminator (Section 3.4.2)
+  discriminator:
+    hidden_dims: [256, 128]
+    input_dim: 512
+
+# ── Domain Alignment ──────────────────────────────────────────────────────────
+alignment:
+  # Loss weights (Section 3.4.4 — grid-search optimal)
+  lambda1: 0.5    # contrastive
+  lambda2: 0.3    # adversarial
+  lambda3: 0.2    # consistency
+
+  # Contrastive learning (Section 3.4.1)
+  contrastive:
+    temperature: 0.07
+    pain_similarity_threshold: 2.0   # τ_p
+    nn_threshold: 0.5                # τ_nn
+    momentum: 0.999                  # MoCo momentum
+    queue_size: 16384
+
+  # Adversarial (Section 3.4.2)
+  adversarial:
+    gamma: 10.0   # GRL schedule sharpness
+    lambda_max: 1.0
+
+  # Consistency (Section 3.4.3)
+  consistency:
+    sharpening_temperature: 0.5
+    n_bins: 11
+
+# ── Training ──────────────────────────────────────────────────────────────────
+training:
+  # Stage 1: Synthetic pre-training
+  stage1:
+    epochs: 100
+    batch_size: 32
+    lr_max: 1.0e-4
+    lr_min: 1.0e-6
+    warmup_epochs: 5
+    early_stopping_patience: 15
+
+  # Stage 2: Domain alignment
+  stage2:
+    epochs: 50
+    batch_size_synthetic: 16
+    batch_size_real: 16
+    lr_max: 5.0e-5
+    lr_min: 1.0e-6
+
+  # Stage 3: Consistency refinement
+  stage3:
+    epochs: 20
+    batch_size_synthetic: 12
+    batch_size_real: 20
+    lr_max: 1.0e-5
+    lr_min: 1.0e-6
+    consistency_cv_threshold: 0.15
+
+  # Optimizer
+  optimizer:
+    type: "adamw"
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 1.0e-4
+    grad_clip_norm: 1.0
+
+  # Multi-task auxiliary losses (Section 3.3.5)
+  aux_loss:
+    binary_weight: 0.2      # pain present/absent
+    category_weight: 0.1    # 4-class severity
+    au_weight: 0.1
+    binary_threshold: 2.0   # pain ≥ 2 → positive
+
+  # Batch pain intensity stratification
+  stratification:
+    bins: [0, 2, 4, 6, 8, 10]
+    oversample_extreme: 1.5   # pain 8–10
+
+  # Mixed precision
+  mixed_precision: true
+  gradient_accumulation_steps: 2
+
+# ── Evaluation ────────────────────────────────────────────────────────────────
+evaluation:
+  pain_threshold: 4.0        # actionable pain for binary classification
+  acceptable_error: 1.0      # ±1 pain unit → clinically acceptable
+  bootstrap_iterations: 10000
+  fairness_threshold: 0.10   # EOD / DPD threshold
+  cross_val_folds: 5
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  # Video
+  image_size: 224
+  sequence_length: 30
+  fps: 30
+
+  # Physiological signals
+  hrv_sample_rate: 1000
+  eda_sample_rate: 100
+  tremor_sample_rate: 100
+  physio_window_seconds: 120
+
+  # Augmentation (strong, for real unlabeled data)
+  augmentation:
+    brightness: 0.3
+    contrast: 0.3
+    saturation: 0.2
+    grayscale_prob: 0.10
+    blur_sigma_min: 0.1
+    blur_sigma_max: 2.0
+    erasing_prob: 0.20
+    temporal_shift_seconds: 0.5
+    frame_dropout_prob: 0.10
+    physio_noise_snr_min: 15
+    physio_noise_snr_max: 25
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+  synthetic_data: "data/synthetic"
+  real_unlabeled: "data/real_unlabeled"
+  unbc_data: "data/UNBC-McMaster"
+  biovid_data: "data/BioVid"
+  neonatal_data: "data/neonatal"
+  checkpoints: "checkpoints"
+  logs: "logs"
+
+# ── Hardware ──────────────────────────────────────────────────────────────────
+hardware:
+  num_gpus: 4
+  num_workers: 8
+  pin_memory: true
+  seed: 42
