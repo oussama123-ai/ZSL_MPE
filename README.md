@@ -1,7 +1,7 @@
 # Zero-Shot Multimodal Pain Estimation
 
 > **Paper**: *Zero-Shot Multimodal Pain Estimation via Synthetic Pain Simulation and Domain-Invariant Learning*  
-> **Authors**: Oussama El Othmani, Sami Naouali, Riadh Ouersighni
+> **Authors**: Oussama El Othmani, Sami Naouali
 
 ---
 
@@ -119,7 +119,7 @@ python scripts/evaluate.py \
 ```bibtex
 @article{elothmani2025zeroshotpain,
   title={Zero-Shot Multimodal Pain Estimation via Synthetic Pain Simulation and Domain-Invariant Learning},
-  author={El Othmani, Oussama and Naouali, Sami and Ouersighni, Riadh},
+  author={El Othmani, Oussama and Naouali, Sami},
   year={2025}
 }
 ```
